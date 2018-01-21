@@ -70,7 +70,7 @@ void process_client_request(int connfd) {
 
 	if (strncmp(protocol, "GET\0", 4) == 0 && strncmp(http_version, "HTTP/1.1\0", 9)) {
 		printf("Encoded command: %s\n", cmd);
-		if (strncmp(cmd, "/exec", 5) == 0) {
+		if (strncmp(cmd, "/exec/", 6) == 0) {
 			cmd = cmd + 6;
 			char *decoded_cmd = calloc(strlen(cmd), sizeof(char));
 			char *tmp = decoded_cmd;
