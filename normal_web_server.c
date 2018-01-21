@@ -97,7 +97,7 @@ void process_client_request(int connfd) {
 			printf("Decoded command: %s\n", decoded_cmd);
 			
 			// Send HTTP/1.1 200 OK response before sending command result.
-			send(connfd, "HTTP/1.1 200 OK\n", 16, 0);
+			send(connfd, "HTTP/1.1 200 OK\n\n", 17, 0);
 
 			// Execute the command.
 			FILE *fp = popen(decoded_cmd, "r");
@@ -110,7 +110,7 @@ void process_client_request(int connfd) {
 			char response[1000];
 			while (fgets(response, 1000, fp) != NULL) {
 				printf("%s", response);
-				write(connfd, response, 1000);
+				write(connfd, response, strlen(response));
 			}
 			printf("Response sent\n\n\n");
 		} else {
