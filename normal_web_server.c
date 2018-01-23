@@ -2,12 +2,15 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <signal.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netdb.h>
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <signal.h>
+
+int sockfd, i;
 
 /*
  * Start the server on the given port number.
@@ -25,6 +28,8 @@ int start_server(int port_no) {
 		printf("Error: socket()\n");
 		exit(1);
 	}
+	int option = 1;
+	setsockopt(sockfd, SOL_SOCKET, (SO_REUSEPORT | SO_REUSEADDR), (char*)&option, sizeof(option));
 
 	if (bind(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) == -1) {
 		printf("Error: bind()\n");
@@ -36,7 +41,6 @@ int start_server(int port_no) {
 		printf("Error: listen()\n");
 		exit(1);
 	}
-	printf("***********Server started*********\n");
 
 	return sockfd;
 }
@@ -68,33 +72,33 @@ void process_client_request(int connfd) {
 		http_version = strtok(NULL, "\n");
 	}
 
-	if (strncmp(protocol, "GET\0", 4) == 0 && strncmp(http_version, "HTTP/1.1\0", 9)) {
-		printf("Encoded command: %s\n", cmd);
-		if (strncmp(cmd, "/exec/", 6) == 0) {
-			cmd = cmd + 6;
-			char *decoded_cmd = calloc(strlen(cmd), sizeof(char));
-			char *tmp = decoded_cmd;
-			
-			// Convert the encoded URL to decoded string command.
-			while (*cmd) {
-				if (*cmd == '%') {
-					if (*(cmd + 1) && *(cmd + 2)) {
-						char hex[3];
-						char ascii;
-						hex[0] = *(cmd + 1);
-						hex[1] = *(cmd + 2);
-						hex[2] = '\0';
-						sscanf(hex, "%x", (unsigned int *)&ascii);
-						*tmp = ascii;
-						tmp++;
-						cmd += 3;
-					}
-				} else {
-					*tmp++ = *cmd++;
-				}
+	// Convert the encoded URL to decoded string command.
+	printf("%s\n", cmd);
+	char *decoded_cmd = calloc(strlen(cmd), sizeof(char));
+	char *tmp = decoded_cmd;
+	while (*cmd) {
+		if (*cmd == '%') {
+			if (*(cmd + 1) && *(cmd + 2)) {
+				char hex[3];
+				char ascii;
+				hex[0] = *(cmd + 1);
+				hex[1] = *(cmd + 2);
+				hex[2] = '\0';
+				sscanf(hex, "%x", (unsigned int *)&ascii);
+				*tmp = ascii;
+				tmp++;
+				cmd += 3;
 			}
-			*tmp = '\0';
-			printf("Decoded command: %s\n", decoded_cmd);
+		} else {
+			*tmp++ = *cmd++;
+		}
+	}
+	*tmp = '\0';
+
+	if (strncmp(protocol, "GET\0", 4) == 0 && strncmp(http_version, "HTTP/1.1\0", 9)) {
+		if (strncmp(decoded_cmd, "/exec/", 6) == 0) {
+			decoded_cmd = decoded_cmd + 6;
+			
 			
 			// Send HTTP/1.1 200 OK response before sending command result.
 			send(connfd, "HTTP/1.1 200 OK\n\n", 17, 0);
@@ -105,29 +109,37 @@ void process_client_request(int connfd) {
 				printf("Error: popen()\n");
 			}
 
-			printf("Respose:\n");
 			// Send the output as response.
 			char response[1000];
 			while (fgets(response, 1000, fp) != NULL) {
-				printf("%s", response);
 				write(connfd, response, strlen(response));
 			}
-			printf("Response sent\n\n\n");
+			printf("%s", response);
 		} else {
-			write(connfd, "HTTP/1.1 404 Not Found\n", 23);
+			write(connfd, "HTTP/1.1 404 Not Found\r\n", 24);
 		}
 	} else {
-		write(connfd, "HTTP/1.1 404 Not Found\n", 23);
+		write(connfd, "HTTP/1.1 404 Not Found\r\n", 24);
 	}
 
 	shutdown(connfd, SHUT_RDWR);
 	close(connfd);
 }
 
+void signal_handler(int signal_no) {
+	if (signal_no == SIGINT || signal_no == SIGINT) {
+		close(sockfd);
+		exit(0);
+	}
+}
+
 /*
  * TODO: Close socket on signal or abrupt closing of program.
  */
 int main(int argc, char *argv[]) {
+
+	signal(SIGINT, signal_handler);
+	signal(SIGKILL, signal_handler);
 
 	// Check for proper input.
 	if (argc != 2) {
@@ -139,14 +151,13 @@ int main(int argc, char *argv[]) {
 		printf("Invalid port number\n");
 		return 0;
 	}
-	printf("Port: %d\n", port_no);
 	
 	// Start the server for the given port.
-	int sockfd = start_server(port_no);
+	sockfd = start_server(port_no);
 
 	struct sockaddr_in client_addr;
 	socklen_t client_addr_len;
-	int i = 0;
+	i = 0;
 	while(1) {
 		client_addr_len = sizeof(client_addr);
 		// Accept a client request.
