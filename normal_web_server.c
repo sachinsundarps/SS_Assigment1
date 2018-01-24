@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <limits.h>
 #include <signal.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -56,6 +57,10 @@ void process_client_request(int connfd) {
 	
 	int ret = recv(connfd, full_request, 1000, 0);
 
+	int gzip = 0;
+	if (strstr(full_request, "gzip") != NULL) {
+		gzip = 1;
+	}
 	if (ret == -1) {
 		printf("Error: recv()\n");
 	} else if (ret == 0) {
@@ -80,12 +85,12 @@ void process_client_request(int connfd) {
 		if (*cmd == '%') {
 			if (*(cmd + 1) && *(cmd + 2)) {
 				char hex[3];
-				char ascii;
+				unsigned int ascii;
 				hex[0] = *(cmd + 1);
 				hex[1] = *(cmd + 2);
 				hex[2] = '\0';
 				sscanf(hex, "%x", (unsigned int *)&ascii);
-				*tmp = ascii;
+				*tmp = (char)ascii;
 				tmp++;
 				cmd += 3;
 			}
@@ -101,7 +106,11 @@ void process_client_request(int connfd) {
 			
 			
 			// Send HTTP/1.1 200 OK response before sending command result.
-			send(connfd, "HTTP/1.1 200 OK\n\n", 17, 0);
+			if (gzip != 0) {
+				send(connfd, "HTTP/1.1 200 OK\r\nContent-Encoding: gzip\n\n", 42, 0);
+			} else {
+				send(connfd, "HTTP/1.1 200 OK\n\n", 17, 0);
+			}
 
 			// Execute the command.
 			FILE *fp = popen(decoded_cmd, "r");
@@ -111,10 +120,18 @@ void process_client_request(int connfd) {
 
 			// Send the output as response.
 			char response[1000];
+			char *full_response;
+			int size = 0;
 			while (fgets(response, 1000, fp) != NULL) {
-				write(connfd, response, strlen(response));
+				size += strlen(response);
 			}
-			printf("%s", response);
+			full_response = calloc(size, sizeof(char));
+
+			fp = popen(decoded_cmd, "r");
+			while (fgets(response, 1000, fp) != NULL) {
+				strncat(full_response, response, size);
+			}
+			write(connfd, full_response, strlen(full_response));
 		} else {
 			write(connfd, "HTTP/1.1 404 Not Found\r\n", 24);
 		}
@@ -127,15 +144,12 @@ void process_client_request(int connfd) {
 }
 
 void signal_handler(int signal_no) {
-	if (signal_no == SIGINT || signal_no == SIGINT) {
+	if (signal_no == SIGINT || signal_no == SIGKILL) {
 		close(sockfd);
 		exit(0);
 	}
 }
 
-/*
- * TODO: Close socket on signal or abrupt closing of program.
- */
 int main(int argc, char *argv[]) {
 
 	signal(SIGINT, signal_handler);
